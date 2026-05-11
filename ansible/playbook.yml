@@ -1,0 +1,54 @@
+---
+- name: Configure StatusPulse Server
+  hosts: statuspulse
+  become: yes
+  tasks:
+    - name: Install required system packages
+      apt:
+        name: ['ufw', 'unattended-upgrades', 'curl']
+        state: present
+        update_cache: yes
+
+    - name: Configure UFW firewall rules
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - '22'
+        - '80'
+        - '443'
+        - '3001'
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Setup swap file (1GB) for memory management
+      command: fallocate -l 1G /swapfile
+      args:
+        creates: /swapfile
+
+    - name: Set strict swap file permissions
+      file:
+        path: /swapfile
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Format swap space
+      command: mkswap /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Enable swap space
+      command: swapon /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Setup daily cron job for PostgreSQL Backup
+      cron:
+        name: "Daily StatusPulse DB Backup"
+        minute: "0"
+        hour: "2"
+        job: "bash /home/ubuntu/statuspulse/scripts/backup.sh >> /var/log/statuspulse-backup.log 2>&1"
+        user: ubuntu
