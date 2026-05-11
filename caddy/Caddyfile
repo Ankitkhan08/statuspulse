@@ -1,0 +1,8 @@
+{
+    email ak786ankitkhan@gmail.com
+}
+
+ankitpulse.duckdns.org {
+    reverse_proxy localhost:8000
+    encode gzip
+}
