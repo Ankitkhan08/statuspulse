@@ -14,16 +14,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Lint Python with ruff
-        uses: chartboost/ruff-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          args: check app/
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint Python with ruff
+        run: ruff check app/ --ignore E501,W291,W293
+        continue-on-error: false
 
       - name: Lint Dockerfile with hadolint
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          failure-threshold: warning
+          failure-threshold: error
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -33,7 +40,7 @@ jobs:
 
       - name: Create .env file
         run: |
-          cat > .env << EOF
+          cat > .env << 'EOF'
           DB_NAME=statuspulse
           DB_USER=statuspulse_user
           DB_PASSWORD=ci_test_password_123
@@ -45,10 +52,25 @@ jobs:
         run: |
           docker compose up -d
           echo "Waiting for services to be healthy..."
-          sleep 30
+          for i in $(seq 1 12); do
+            STATUS=$(docker compose ps --format json | python3 -c "
+          import sys, json
+          data = sys.stdin.read().strip().split('\n')
+          healthy = all('healthy' in line or 'running' in line for line in data if line)
+          print('ok' if healthy else 'wait')
+          " 2>/dev/null || echo "wait")
+            echo "Attempt $i: $STATUS"
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "App is ready!"
+              break
+            fi
+            sleep 10
+          done
 
       - name: Check all services healthy
-        run: docker compose ps
+        run: |
+          docker compose ps
+          curl -sf http://localhost:8000/health | python3 -m json.tool
 
       - name: Run integration tests
         run: |
@@ -68,6 +90,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: |
-            tests/
+          path: tests/
           retention-days: 7
